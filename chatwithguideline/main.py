@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import random
 from datetime import datetime
 from dotenv import load_dotenv
 from nicegui import Client, ui
@@ -96,18 +97,24 @@ async def main(client: Client):
                                                for c in data if c['type'] == t]} for t in unique_types],
                        label_key='id', on_select=lambda e: _submit(e.value))
 
-    async def new_guideline(random=True):
-        if random:
-            result = random.sample(list_guidelines().keys(), 1)
-        else:
-            result = await dialog
+    def new_guideline(result):
+        if result is None:
+            print('Only changed assistent settings')
+            return
+
         print(f'New guideline selected {result}')
         label = list_guidelines()[result]
 
         global messages, llm, chat_history, selected_guideline
 
         selected_guideline = result
-        llm = create_llm(result)
+
+        _levels = ['Laymen', 'Intermediate', 'Advanced', 'Expert']
+        _creativity = {
+            'Very focused': 0, 'Focused': 0.25, 'Balanced': 0.5, 'Creative': 0.75, 'Very creative': 1}
+
+        llm = create_llm(result, _levels.index(
+            level_slider.value), _creativity[creativity_slider.value])
         messages = []
         chat_history = []
         messages.append(
@@ -119,31 +126,38 @@ async def main(client: Client):
         status_label.text = label
         status_div.classes('p-2 bg-green-100')
 
+    async def await_guideline():
+        result = await dialog
+        new_guideline(result)
+
     with ui.left_drawer(bottom_corner=True).style('background-color: #d7e3f4'):
         with ui.splitter(horizontal=True).classes('space-y-4') as splitter:
             with splitter.before:
                 with ui.element('div').classes('space-y-2'):
-                    ui.label('Guideline').classes('text-xl mt-1')
-                    ui.button('Pick guideline',
-                              on_click=lambda e: new_guideline(False)).classes('p-2')
-                    ui.button('Random guideline',
-                              on_click=lambda e: new_guideline(True)).classes('p-2 bg-green-100')
+                    with ui.column():
+                        ui.label('Guideline').classes('text-xl mt-1')
+                        ui.button('Pick guideline',
+                                  on_click=await_guideline).classes('p-2')
+                        ui.button('Random guideline',
+                                  on_click=lambda: new_guideline(random.sample(list_guidelines().keys(),
+                                                                               1)[0])).classes('p-2 bg-green-100')
 
-                    ui.label('Current guideline').classes('text-lg mt-2')
-                    with ui.element('div').classes('p-2 bg-red-100') as status_div:
+                        ui.label('Current guideline').classes(
+                            'text-lg mt-2 rounded')
+                    with ui.element('div').classes('p-2 bg-red-100 rounded') as status_div:
                         status_label = ui.label(
                             selected_guideline or 'No guideline selected')
             with splitter.after:
-                ui.label('Settings').classes('text-xl mt-1')
-                ui.label('Exploration rate').classes('text-lg mt-2')
-                exploration_slider = ui.slider(
-                    min=0, max=1, value=0.5, step=0.1)
-                ui.label().bind_text_from(exploration_slider, 'value')
+                ui.label('Assistant settings').classes('text-xl mt-1')
+                ui.label('Level of conversation').classes('text-lg mt-2')
+                level_slider = ui.select(options=['Laymen', 'Intermediate', 'Advanced', 'Expert'],
+                                         value='Advanced').on('update:model-value',
+                                                              lambda: new_guideline(selected_guideline))
 
-                ui.label('Maximum length of response').classes('text-lg mt-2')
-                token_slider = ui.slider(
-                    min=100, max=4000, value=2000, step=10)
-                ui.label().bind_text_from(token_slider, 'value')
+                ui.label('Creativity of the response').classes('text-lg mt-2')
+                creativity_slider = ui.select(options=['Very focused', 'Focused', 'Balanced', 'Creative', 'Very creative'],
+                                              value='Creative').on('update:model-value',
+                                                                   lambda: new_guideline(selected_guideline))
 
     with ui.footer().classes('bg-white'), ui.column().classes('w-full max-w-3xl mx-auto my-6'):
         with ui.row().classes('w-full no-wrap items-center'):
@@ -153,4 +167,4 @@ async def main(client: Client):
         ui.markdown('simple chat app built with [NiceGUI](https://nicegui.io)') \
             .classes('text-xs self-end mr-8 m-[-1em] text-primary')
 
-ui.run(title='Chat with GPT-3 (example)')
+ui.run(title='Chat with your medical guideline!', favicon='⚕️')

@@ -6,6 +6,7 @@ from langchain.document_loaders import UnstructuredPDFLoader
 from langchain.text_splitter import CharacterTextSplitter
 import os
 import json
+import random
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -25,7 +26,7 @@ def process_file(file):
 
     chunks = text_splitter.split_documents(data)
     print(f'Created {len(chunks)} chunks')
-    print(f'Chunk 50 example: {chunks[50]}')
+    print(f'Showing random chunk example: {random.choice(chunks)}')
 
     embeddings = OpenAIEmbeddings()
     pdfsearch = Chroma.from_documents(
@@ -37,7 +38,7 @@ def process_file(file):
     # Appending embeddings to metadata.json
     with open('embeddings/metadata.json', 'r') as f:
         d = json.load(f)
-        d.append({"dir": file, "title": "", type: ""})
+        d.append({"dir": file, "title": "", "type": ""})
 
     with open('embeddings/metadata.json', 'w') as f:
         json.dump(d, f, indent=4)
