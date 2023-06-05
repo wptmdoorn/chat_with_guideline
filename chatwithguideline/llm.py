@@ -1,4 +1,4 @@
-from langchain.chains import ConversationalRetrievalChain
+from langchain.chains import ConversationalRetrievalChain, RetrievalQA
 from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.vectorstores import Chroma
@@ -87,3 +87,30 @@ def create_llm(embedding_dir: str, expert_level: str, creativity: int) -> Conver
     )
 
     return llm
+
+
+def get_metadata(embedding_dir: str) -> tuple[str, str]:
+    vectordb = Chroma(embedding_function=OpenAIEmbeddings(),
+                      persist_directory=f'embeddings/{embedding_dir}')
+
+    qa = RetrievalQA.from_chain_type(
+        llm=OpenAI(temperature=0.5), chain_type="stuff", retriever=vectordb.as_retriever(search_kwargs={"k": 3}))
+
+    query = """Can you give me a short description of the guideline? 
+    Below are a few examples that I would like it to adhere to. 
+    Limit it to a maximum of 20 words and stick to the format of YEAR - ABBREVIATION - TITLE.
+    2020 - PRISMA - Preferred Reporting Items for Systematic Reviews and Meta-Analyses
+    2021 - Europ Tyroid Associat - Guidelines for the Management of Iodine-Based Contrast Media-Induced Thyroid DysfunctionThyroid guidelines
+    2014 - Endocrine Society - Practical Guideline to Pheochromocytoma and Paraganglioma
+    """
+
+    suggested_title = qa.run(query)
+
+    query = """Can you give me the most appropriate medical subspecialty for this guideline? Below are the options:
+    Cardiology, Endocrinology, Gastroenterology, General Medicine, Geriatrics, Hematology, Infectious Diseases, 
+    Nephrology, Neurology, Oncology, Pulmonology, Rheumatology, Surgery, Epidemiology, Family Medicine, Clinical chemistry, Others.
+    """
+
+    suggested_specialty = qa.run(query)
+
+    return (suggested_title, suggested_specialty)

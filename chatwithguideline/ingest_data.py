@@ -4,6 +4,7 @@ from langchain.vectorstores import Chroma
 
 from langchain.document_loaders import UnstructuredPDFLoader
 from langchain.text_splitter import CharacterTextSplitter
+from llm import get_metadata
 import os
 import json
 import random
@@ -35,10 +36,13 @@ def process_file(file):
 
     print(f'Saved embeddings to embeddings/{file}')
 
+    # Parsing metadata
+    title, specialty = get_metadata(file)
+
     # Appending embeddings to metadata.json
     with open('embeddings/metadata.json', 'r') as f:
         d = json.load(f)
-        d.append({"dir": file, "title": "", "type": ""})
+        d.append({"dir": file, "title": title, "type": specialty})
 
     with open('embeddings/metadata.json', 'w') as f:
         json.dump(d, f, indent=4)
