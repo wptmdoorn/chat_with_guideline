@@ -24,19 +24,19 @@ def list_guidelines(with_specialty=False) -> dict:
             return {x['dir']: x['title'] for x in json.load(f)}
 
 
-@ui.refreshable
-async def chat_messages() -> None:
-    for name, text, avatar, stamp in app.storage.user.get('messages', []):
-        ui.chat_message(text=text, name=name, stamp=stamp,
-                        avatar=avatar, sent=name == 'You', text_html=True)
-    
-    if app.storage.user.get('thinking', False):
-        ui.spinner(size='3rem').classes('self-center')
-    await ui.run_javascript('window.scrollTo(0, document.body.scrollHeight)', respond=False)
-
-
 @ui.page('/')
 async def main(client: Client):
+    
+    @ui.refreshable
+    async def chat_messages() -> None:
+        for name, text, avatar, stamp in app.storage.user.get('messages', []):
+            ui.chat_message(text=text, name=name, stamp=stamp,
+                            avatar=avatar, sent=name == 'You', text_html=True)
+        
+        if app.storage.user.get('thinking', False):
+            ui.spinner(size='3rem').classes('self-center')
+        await ui.run_javascript('window.scrollTo(0, document.body.scrollHeight)', respond=False)
+
     async def send() -> None:
         if app.storage.user['guideline'] is None:
             ui.notify('Please select a guideline to chat with!')
@@ -67,10 +67,10 @@ async def main(client: Client):
     
     # for now we just re-intialize the user storage
     # todo: we *may* persist data across sessions and implement chat history
-    app.storage.user['guideline'] = app.storage.user.get('guideline', None)
-    app.storage.user['history'] = app.storage.user.get('history', [])
-    app.storage.user['messages'] = app.storage.user.get('messages', [])
-    app.storage.user['thinking'] = app.storage.user.get('thinking', None)
+    app.storage.user['guideline'] = None
+    app.storage.user['history'] = []
+    app.storage.user['messages'] = []
+    app.storage.user['thinking'] = False
 
     app.storage.user['count'] = app.storage.user.get('count', 0) + 1
 
