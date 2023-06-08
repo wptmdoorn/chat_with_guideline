@@ -4,9 +4,11 @@ from langchain.llms import OpenAI
 from langchain.vectorstores import Chroma
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.memory import ConversationBufferMemory
-from langchain.chains.question_answering import load_qa_chain
-from langchain.chains.conversational_retrieval.prompts import CONDENSE_QUESTION_PROMPT, QA_PROMPT
 from langchain.prompts import SystemMessagePromptTemplate, HumanMessagePromptTemplate, ChatPromptTemplate
+from langchain.chains.chat_vector_db.prompts import CONDENSE_QUESTION_PROMPT
+from langchain.chains.llm import LLMChain
+from langchain.chains.question_answering import load_qa_chain
+from langchain.llms import OpenAI
 
 prompts = [
     """You are a chat assistant that has direct access to information of a medical guideline. 
@@ -44,24 +46,9 @@ prompt_template = """Use the following pieces of context to answer the question 
 
 Question: {question}
 Helpful Answer:"""
-# QA_PROMPT = PromptTemplate(
-#    template=prompt_template, input_variables=["context", "question"]
-# )
 
 
-# Create the chat prompt templates
-# messages = [
-#    SystemMessagePromptTemplate.from_template(system_template),
-#    HumanMessagePromptTemplate.from_template("{question}")
-# ]
-# qa_prompt = ChatPromptTemplate.from_messages(messages)
-
-
-# we can adjust the prompt with the following:
-# see stuff_prompt.py
-# that should be used as QA prompt
-
-def create_llm(embedding_dir: str, expert_level: str, creativity: int) -> ConversationalRetrievalChain:
+def create_llm(embedding_dir: str, expert_level: str, creativity: int, handl) -> ConversationalRetrievalChain:
     print('Building LLM...')
     print(expert_level)
     print(creativity)
@@ -77,16 +64,29 @@ def create_llm(embedding_dir: str, expert_level: str, creativity: int) -> Conver
         HumanMessagePromptTemplate.from_template("{question}")
     ])
 
-    llm = ConversationalRetrievalChain.from_llm(
-        llm=ChatOpenAI(model_name='gpt-3.5-turbo', temperature=creativity),
-        return_source_documents=True,
-        combine_docs_chain_kwargs={"prompt": qa_prompt},
-        retriever=vectordb.as_retriever(
-            search_kwargs={"k": 3},
-            memory=memory,)
+    question_generator = LLMChain(
+        llm=OpenAI(
+            temperature=0,
+            verbose=True), prompt=CONDENSE_QUESTION_PROMPT,
+    )
+    doc_chain = load_qa_chain(
+        ChatOpenAI(model_name='gpt-3.5-turbo', verbose=True,
+                   streaming=True, callbacks=[handl]),
+        chain_type="stuff",
+        prompt=qa_prompt,
+        callbacks=[handl],
     )
 
-    return llm
+    qa = ConversationalRetrievalChain(
+        retriever=vectordb.as_retriever(
+            search_kwargs={"k": 3},
+            memory=memory,),
+        combine_docs_chain=doc_chain,
+        question_generator=question_generator,
+        verbose=True
+    )
+
+    return qa
 
 
 def get_metadata(embedding_dir: str) -> tuple[str, str]:

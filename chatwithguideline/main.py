@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, jsonpickle
+import json, asyncio, time
 import random
 from datetime import datetime
 from dotenv import load_dotenv
@@ -8,30 +8,42 @@ from typing import List, Tuple
 from uuid import uuid4
 
 from llm import create_llm
-
+from constants import (welcome_message, new_guideline_message, list_guidelines,
+                       format_bot_message, llm_creativity, llm_levels)
+from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
 
 load_dotenv()
-
-_levels = ['Laymen', 'Intermediate', 'Advanced', 'Expert']
-_creativity = {'Very focused': 0, 'Focused': 0.25, 'Balanced': 0.5, 'Creative': 0.75, 'Very creative': 1}
-
-
-def list_guidelines(with_specialty=False) -> dict:
-    with open('embeddings/metadata.json', 'r') as f:
-        if with_specialty:
-            return json.load(f)
-        else:
-            return {x['dir']: x['title'] for x in json.load(f)}
 
 
 @ui.page('/')
 async def main(client: Client):
+    class StreamHandler(AsyncCallbackHandler):
+        async def on_llm_new_token(self, token: str, **kwargs) -> None:
+            app.storage.user['messages'][-1]['text'] += token	
+            chat_messages.refresh()
+
+    async def delayed_message(msg_dict):
+        app.storage.user.get('messages', []).append({
+            "text": "",
+            "name": msg_dict['name'],
+            "avatar":  msg_dict['avatar'],   
+            "stamp":  msg_dict['stamp']
+        })
+
+        for letter in msg_dict['text'].split(' '):
+            app.storage.user['messages'][-1]['text'] += f' {letter} '
+            chat_messages.refresh()
+            await asyncio.sleep(0.1)
     
     @ui.refreshable
     async def chat_messages() -> None:
-        for name, text, avatar, stamp in app.storage.user.get('messages', []):
-            ui.chat_message(text=text, name=name, stamp=stamp,
-                            avatar=avatar, sent=name == 'You', text_html=True)
+        for msg_dict in app.storage.user.get('messages', []):
+            ui.chat_message(text=msg_dict['text'], 
+                            name=msg_dict['name'], 
+                            stamp=msg_dict['stamp'],
+                            avatar=msg_dict['avatar'], 
+                            sent=msg_dict['name'] == 'You', 
+                            text_html=True).classes('font-sans')
         
         if app.storage.user.get('thinking', False):
             ui.spinner(size='3rem').classes('self-center')
@@ -44,20 +56,25 @@ async def main(client: Client):
         
         message = text.value
         stamp = datetime.utcnow().strftime('%X')
-        app.storage.user.get('messages', []).append(('You', text.value, avatar, stamp))
-        app.storage.user['thinking'] = True
+        app.storage.user.get('messages', []).append({"name": 'You', "text": text.value, "avatar": avatar, "stamp": stamp})
         text.value = ''
-        chat_messages.refresh()
-
-        _llm = create_llm(app.storage.user['guideline'], _levels.index(level_slider.value), _creativity[creativity_slider.value])
-        response = await _llm.acall({'question': message, "chat_history": app.storage.user['history']})
-        stamp = datetime.utcnow().strftime('%X')
-
-        app.storage.user.get('messages', []).append(
-            ('Bot', response['answer'], 'https://robohash.org/assistant?bgset=bg2', stamp))
         app.storage.user['thinking'] = False
-        app.storage.user.get('history', []).append((message, response['answer']))
         chat_messages.refresh()
+
+        app.storage.user.get('messages', []).append(format_bot_message(''))
+
+        _llm = create_llm(app.storage.user['guideline'], 
+                          llm_levels.index(level_slider.value), 
+                          llm_creativity[creativity_slider.value],
+                          StreamHandler())
+        
+        result = _llm.acall(
+                {"question": message, "chat_history": app.storage.user['history']}
+        )
+        await result
+
+        app.storage.user.get('history', 
+                             []).append((message, app.storage.user['messages'][-1]['text']))
 
     avatar = f'https://robohash.org/{str(uuid4())}?bgset=bg2'
 
@@ -69,12 +86,10 @@ async def main(client: Client):
     # todo: we *may* persist data across sessions and implement chat history
     app.storage.user['guideline'] = None
     app.storage.user['history'] = []
-    app.storage.user['messages'] = []
+    app.storage.user['messages'] : list[dict] = []
     app.storage.user['thinking'] = False
 
-    app.storage.user['count'] = app.storage.user.get('count', 0) + 1
-
-    print(app.storage.user)
+    asyncio.ensure_future(delayed_message(format_bot_message(welcome_message)))
 
     with ui.column().classes('w-full max-w-2xl mx-auto items-stretch'):
         await chat_messages()
@@ -85,7 +100,7 @@ async def main(client: Client):
     with ui.dialog() as dialog, ui.card():
         # Get unique "type" values
         data = list_guidelines(True)
-        unique_types = set(item["type"] for item in data)
+        unique_types = sorted(set(item["type"].strip() for item in data))
 
         def _submit(v):  # for ui.tree
             if v in unique_types:
@@ -95,45 +110,36 @@ async def main(client: Client):
                 dialog.submit(
                     [item for item in data if item["title"] == v][0]['dir'])
 
-        ui.label('Chose a guideline to chat with...').classes('text-bold')
+        ui.label('Choose a guideline to chat with...').classes('text-bold')
         ui.label('Select or search on from this list...')
         ui.select(options=list_guidelines(), with_input=True,
                   on_change=lambda e: dialog.submit(e.value))
 
         ui.label('Or manually select by name...')
         tree = ui.tree([{'id': t, 'children': [{'id': c['title']}
-                                               for c in data if c['type'] == t]} for t in unique_types],
+                                               for c in data if c['type'].strip() == t]} for t in unique_types],
                        label_key='id', on_select=lambda e: _submit(e.value))
 
-    def new_guideline(result):
-        print('NEW GUIDELINE')
-        print(result)
+    async def new_guideline(result):
         if result is None:
-            print('Only changed assistent settings')
             return
 
-        print(f'New guideline selected {result}')
         label = list_guidelines()[result]
         app.storage.user['guideline'] = result
-        
-        print('test')
-        print(app.storage.user['messages'])
-        print(app.storage.user.get('messages', []))
-        print(app.storage.user['messages'])
 
-        app.storage.user['history'] = []
-        app.storage.user.get('messages', []).append(
-            ('Bot', f'Hello! I am your chat assistant and I have direct access to all the content of <b>{label}</b>. How can I help you? Please ask whatever you want to know.',
-             'https://robohash.org/assistant?bgset=bg2', datetime.utcnow().strftime('%X')))
-        
-        chat_messages.refresh()
-
+        _msg = new_guideline_message.format(label=label,
+                                           level=level_slider.value,
+                                           creativity=creativity_slider.value)
+        asyncio.ensure_future(delayed_message(format_bot_message(_msg)))    
         status_label.text = label
         status_div.classes('p-2 bg-green-100')
 
     async def await_guideline():
         result = await dialog
-        new_guideline(result)
+        await new_guideline(result)
+
+    async def await_random_guideline():
+        await new_guideline(random.sample(list_guidelines().keys(), 1)[0])
 
     with ui.left_drawer(bottom_corner=True).style('background-color: #d7e3f4'):
         with ui.splitter(horizontal=True).classes('space-y-4') as splitter:
@@ -144,8 +150,7 @@ async def main(client: Client):
                         ui.button('Pick guideline',
                                   on_click=await_guideline).classes('p-2')
                         ui.button('Random guideline',
-                                  on_click=lambda: new_guideline(random.sample(list_guidelines().keys(),
-                                                                               1)[0])).classes('p-2 bg-green-100')
+                                  on_click=await_random_guideline).classes('p-2 bg-green-100')
 
                         ui.label('Current guideline').classes(
                             'text-lg mt-2 rounded')
@@ -172,4 +177,16 @@ async def main(client: Client):
         ui.markdown('simple chat app built with [NiceGUI](https://nicegui.io)') \
             .classes('text-xs self-end mr-8 m-[-1em] text-primary')
 
-ui.run(title='Chat with your medical guideline!', favicon='🚀', storage_secret='StyIE3Vkv5YzkOWeKgPt')
+import argparse, os
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--trace", help="employ langchain tracing", action="store_true")
+args = parser.parse_args()
+
+if args.trace:
+    import subprocess
+    os.environ["LANGCHAIN_TRACING"] = "true"
+    subprocess.run(["langchain", "plus", "start"])
+
+ui.run(title='Chat with your medical guideline!',
+           favicon='🚀', storage_secret='StyIE3Vkv5YzkOWeKgPt')
