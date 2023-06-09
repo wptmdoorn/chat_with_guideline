@@ -15,7 +15,7 @@ from langchain.callbacks.base import BaseCallbackHandler, AsyncCallbackHandler
 load_dotenv()
 
 
-@ui.page('/')
+@ui.page('/chatwithguideline')
 async def main(client: Client):
     class StreamHandler(AsyncCallbackHandler):
         async def on_llm_new_token(self, token: str, **kwargs) -> None:
